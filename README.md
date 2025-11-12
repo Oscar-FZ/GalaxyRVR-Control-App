@@ -76,7 +76,7 @@ Displays three options to navigate between modes:
 
 _Add image here:_
 ```markdown
-![Main Menu Screenshot](images/main_menu.png)
+![Main Menu Screenshot](images/main_menu.jpeg)
 ```
 
 ---
@@ -90,7 +90,7 @@ This mode allows **direct control** of the rover using:
 
 _Add image here:_
 ```markdown
-![Manual Mode Screenshot](images/manual_mode.png)
+![Manual Mode Screenshot](images/manual_mode.jpeg)
 ```
 
 **Features:**
@@ -121,7 +121,7 @@ K,Q,D,M,E,F,duration_ms
 
 _Add image here:_
 ```markdown
-![Systematic Mode Screenshot](images/systematic_mode.png)
+![Systematic Mode Screenshot](images/systematic_mode.jpeg)
 ```
 
 ---
@@ -150,7 +150,7 @@ Includes:
 
 _Add image here:_
 ```markdown
-![Monitor Mode Screenshot](images/monitor_mode.png)
+![Monitor Mode Screenshot](images/monitor_mode.jpeg)
 ```
 
 ---
