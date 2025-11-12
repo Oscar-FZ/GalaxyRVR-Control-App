@@ -23,13 +23,7 @@ This project was developed as part of the **Embedded Multi-Agent System validati
 ### 🐍 1. Create and Activate a Python Virtual Environment
 
 ```bash
-# Create a virtual environment
 python -m venv venv
-
-# Activate it (Windows)
-venv\Scripts\activate
-
-# or on Linux / macOS
 source venv/bin/activate
 ```
 
