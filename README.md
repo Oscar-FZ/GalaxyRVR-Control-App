@@ -74,10 +74,8 @@ Displays three options to navigate between modes:
 - **Systematic Mode**
 - **Monitor Mode**
 
-_Add image here:_
-```markdown
+
 ![Main Menu Screenshot](images/main_menu.jpeg)
-```
 
 ---
 
@@ -88,10 +86,9 @@ This mode allows **direct control** of the rover using:
 - **WASD keyboard keys** for intuitive directional control.
 - **Buttons** to toggle the **RGB lamp** and activate **Avoid** or **Follow** behavior modes.
 
-_Add image here:_
-```markdown
+
 ![Manual Mode Screenshot](images/manual_mode.jpeg)
-```
+
 
 **Features:**
 - Realtime sending every 100 ms (`SEND_PERIOD_MS`).
@@ -119,10 +116,9 @@ K,Q,D,M,E,F,duration_ms
 - Visual progress display (`Step X/Y`)  
 - Auto-stop and reset on exit  
 
-_Add image here:_
-```markdown
+
 ![Systematic Mode Screenshot](images/systematic_mode.jpeg)
-```
+
 
 ---
 
@@ -148,10 +144,9 @@ Includes:
   - A8 → Obstacle Avoidance Agent  
   - A9 → Object Following Agent  
 
-_Add image here:_
-```markdown
+
 ![Monitor Mode Screenshot](images/monitor_mode.jpeg)
-```
+
 
 ---
 
@@ -171,7 +166,6 @@ _Add image here:_
 Final-year Electronic Engineering Student  
 **Instituto Tecnológico de Costa Rica (TEC)**  
 📍 SETEC Laboratory – Embedded Systems and Space Technologies  
-📧 [YourEmailHere]
 
 ---
 
