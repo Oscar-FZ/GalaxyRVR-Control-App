@@ -1,1 +1,1 @@
-# GalaxyRVR-Controll-App
+# GalaxyRVR-Control-App
