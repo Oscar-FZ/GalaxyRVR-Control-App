@@ -54,7 +54,7 @@ cd GalaxyRVR-Control-App
 2. Activate your Python environment and run the application:
 
 ```bash
-python main.py
+python GalaxyRVR-Control-App.py
 ```
 
 3. Connect your PC to the rover’s Wi-Fi network (default IP: **192.168.4.1**).
