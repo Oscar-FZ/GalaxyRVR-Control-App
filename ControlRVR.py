@@ -33,58 +33,132 @@ class RoverClient:
         self.websocket = None
         self.connected = False
         self.receive_task = None
+        self.reconnect_task = None
         self.on_message = on_message
         self.on_disconnect = on_disconnect
 
+        # 🔁 Configuración de reconexión automática
+        self.auto_reconnect = True
+        self.reconnect_delay = 0.1  # segundos entre intentos
+        self._closing = False     # bandera para evitar reconexión al cerrar manualmente
+
     async def connect(self):
+        """Establece conexión con el rover."""
+        # Evitar múltiples intentos simultáneos
+        if self.connected:
+            print("Already connected.")
+            return
         try:
             if self.websocket:
                 await self.websocket.close()
+
+            print(f"Connecting to ws://{self.ip}:{self.port} ...")
             self.websocket = await websockets.connect(f"ws://{self.ip}:{self.port}")
             self.connected = True
+            print("✅ Connected to rover.")
+
             if self.on_message:
                 self.on_message({"status": "connected"})
-            if self.receive_task and not self.receive_task.done():
-                self.receive_task.cancel()
+
+            # Cancelar cualquier intento previo de reconexión
+            if self.reconnect_task and not self.reconnect_task.done():
+                self.reconnect_task.cancel()
+
+            # Iniciar recepción de datos
             self.receive_task = asyncio.create_task(self.receive_data())
+
         except Exception as e:
             self.connected = False
+            print(f"❌ Connection failed: {e}")
             if self.on_disconnect:
-                self.on_disconnect(f"Error de conexión: {e}")
+                self.on_disconnect(f"Connection error: {e}")
+            await self._schedule_reconnect()
 
     async def disconnect(self):
+        """Cierra la conexión y detiene reconexiones."""
+        self._closing = True
         try:
             if self.websocket:
                 await self.websocket.close()
         finally:
             self.websocket = None
             self.connected = False
+            print("🔌 Disconnected manually.")
+            if self.reconnect_task and not self.reconnect_task.done():
+                self.reconnect_task.cancel()
+            self._closing = False
 
     async def send(self, data: dict):
+        """Envía datos al rover."""
         if not self.connected or not self.websocket:
             return
         try:
             await self.websocket.send(json.dumps(data))
         except Exception as e:
+            print(f"⚠️ Send error: {e}")
             self.connected = False
             if self.on_disconnect:
-                self.on_disconnect(f"Error envío: {e}")
+                self.on_disconnect(f"Send error: {e}")
+            await self._schedule_reconnect()
+
 
     async def receive_data(self):
+        """Recibe mensajes del rover y los procesa si son JSON válidos."""
         try:
             async for message in self.websocket:
+                # Ignorar mensajes vacíos o solo espacios
+                if not message or not message.strip():
+                    continue
+
+                # Intentar decodificar JSON
                 try:
                     data = json.loads(message)
+                    print(f"📩 Received valid message: {data}")  # ← Muestra JSON decodificado
                     if self.on_message:
                         self.on_message(data)
+
+                # Si no es JSON válido, lo ignoramos sin generar spam
+                except json.JSONDecodeError:
+                    # Puedes comentar la siguiente línea si no quieres verlos del todo
+                    #print(f"⚠️ Ignored non-JSON message: {repr(message)}")
+                    continue
+
                 except Exception as e:
-                    print(f"Error procesando mensaje: {e}")
+                    print(f"⚠️ Unexpected error processing message: {e}")
+                    continue
+
         except Exception as e:
-            print(f"Conexión cerrada: {e}")
+            print(f"⚠️ Connection closed: {e}")
+
         finally:
             self.connected = False
             if self.on_disconnect:
-                self.on_disconnect("Desconectado")
+                self.on_disconnect("Disconnected")
+
+            # Si tienes reconexión automática activada
+            if getattr(self, "auto_reconnect", False) and not getattr(self, "_closing", False):
+                print(f"🔁 Attempting to reconnect in {self.reconnect_delay}s...")
+                await asyncio.sleep(self.reconnect_delay)
+                await self.connect()
+
+
+
+    async def _schedule_reconnect(self):
+        """Programa un intento de reconexión solo si está desconectado y permitido."""
+        if not self.auto_reconnect or self.connected or self._closing:
+            return
+        if self.reconnect_task and not self.reconnect_task.done():
+            return  # Ya hay una tarea intentando reconectar
+
+        async def _reconnect_loop():
+            while not self.connected and not self._closing:
+                print(f"🔁 Attempting to reconnect in {self.reconnect_delay}s...")
+                await asyncio.sleep(self.reconnect_delay)
+                if self._closing:
+                    break
+                await self.connect()
+
+        self.reconnect_task = asyncio.create_task(_reconnect_loop())
 
 
 # ========= HILO DE VIDEO ==========
@@ -117,6 +191,7 @@ class VideoThread(QThread):
         finally:
             self.quit()
             self.wait()
+
 
 
 # ==============================
@@ -153,7 +228,7 @@ class ManualPage(QWidget):
         layout.addLayout(row)
 
         # Instrucciones de teclado
-        hint = QLabel("WASD: W Avanza | S Retrocede | A Gira Izq | D Gira Der (combinables: W+A, W+D)")
+        hint = QLabel("WASD: W Avanza | S Retrocede | A Gira Izq | D Gira Der")
         hint.setStyleSheet("color: #888;")
         layout.addWidget(hint)
 
@@ -180,7 +255,7 @@ class ManualPage(QWidget):
         self.timer = QTimer()
         self.timer.timeout.connect(lambda: asyncio.create_task(self._send_controls()))
 
-        # Captura de teclado 
+        # Captura de teclado robusta
         self.setFocusPolicy(Qt.StrongFocus)
 
     def _slider_box(self, title, minv, maxv, attr_name):
@@ -238,6 +313,7 @@ class ManualPage(QWidget):
         if Qt.Key_A in self.pressed_keys:
             turn -= self.KEY_TURN
 
+        # Mezcla diferencial
         left = speed - turn
         right = speed + turn
         # Saturación a [-100, 100]
@@ -264,12 +340,14 @@ class ManualPage(QWidget):
 
     # Ciclo de vida
     def on_enter(self):
+        # Asegurar captura de teclado incluso si otros widgets piden foco:
         self.grabKeyboard()
         self.timer.start(SEND_PERIOD_MS)
 
     def on_leave(self):
         self.timer.stop()
         self.releaseKeyboard()
+        # Frenar al salir
         self.pressed_keys.clear()
         self.left_motor = 0
         self.right_motor = 0
@@ -280,6 +358,7 @@ class ManualPage(QWidget):
 
 
 class SystematicPage(QWidget):
+    """Submenú Sistemático: envía periódicamente los controles y la secuencia solo actualiza valores."""
     def __init__(self, request_connect, client: RoverClient):
         super().__init__()
         self.request_connect = request_connect
@@ -471,11 +550,16 @@ class MonitorPage(QWidget):
         self.video_url = "http://192.168.4.1:9000/mjpg"
         self.video_thread = None
 
-
+        # Estados
+        self.servo = 90
         self.lamp = 0
 
+        # ====== Layout general en dos columnas ======
         main_layout = QHBoxLayout(self)
 
+        # -----------------------------------
+        # Columna izquierda: sensores + cámara + controles
+        # -----------------------------------
         left = QVBoxLayout()
         main_layout.addLayout(left, 2)  # Peso mayor para que esta parte sea más ancha
 
@@ -531,7 +615,9 @@ class MonitorPage(QWidget):
 
         left.addStretch(1)
 
-        # Consumo de stack
+        # -----------------------------------
+        # Columna derecha: consumo de stack
+        # -----------------------------------
         right = QVBoxLayout()
         main_layout.addLayout(right, 1)
 
@@ -541,13 +627,8 @@ class MonitorPage(QWidget):
         self.agent_labels = {
             "A1": QLabel("Agente WiFi: --"),
             "A2": QLabel("Agente Manejador de Modos: --"),
-            "A3": QLabel("Agente Luces RGB: --"),
-            "A4": QLabel("Agente Motores de las Ruedas: --"),
-            "A5": QLabel("Agente Servomotor de la Cámara: --"),
-            "A6": QLabel("Agente Sensores Infrarrojos: --"),
-            "A7": QLabel("Agente Sensor Ultrasonico: --"),
-            "A8": QLabel("Agente Modo Evasión de Obstáculos: --"),
-            "A9": QLabel("Agente Modo Seguimiento de Objetos: --"),
+            "A3": QLabel("Agente Control de Perifericos: --"),
+            "A4": QLabel("Agente Control de Sensores: --"),
         }
 
         for lbl in self.agent_labels.values():
@@ -558,10 +639,13 @@ class MonitorPage(QWidget):
         right.addWidget(agents_box)
         right.addStretch(1)
 
+        # -----------------------------------
         #  Timer de ping
+        # -----------------------------------
         self.timer = QTimer()
         self.timer.timeout.connect(lambda: asyncio.create_task(self._send_ping()))
 
+    # ======== Funciones internas ========
     async def _send_ping(self):
         if not self.client.connected:
             return
@@ -630,7 +714,7 @@ class MonitorPage(QWidget):
                     label.setText(f"{label.text().split(':')[0]}: {data[key]}")
 
     def on_enter(self):
-        self.timer.start(500)  
+        self.timer.start(500)  # cada 500 ms
 
     def on_leave(self):
         self.timer.stop()
@@ -648,7 +732,7 @@ class MonitorPage(QWidget):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("GalaxyRVR - Control Unificado")
+        self.setWindowTitle("GalaxyRVR - Control")
         self.setGeometry(200, 200, 520, 560)
 
         central = QWidget(); self.setCentralWidget(central)
@@ -667,18 +751,56 @@ class MainWindow(QMainWindow):
         self.client = RoverClient(on_message=self._dispatch_message,
                                   on_disconnect=self._on_disconnect)
 
-        # Menú principal 
+        # ======== Menú principal mejorado ========
         self.menu_page = QWidget()
         v = QVBoxLayout(self.menu_page)
-        lbl = QLabel("Selecciona un modo"); lbl.setFont(QFont("Arial", 13, QFont.Bold))
+        v.setAlignment(Qt.AlignCenter)
+
+        # Título principal grande
+        title = QLabel("GalaxyRVR Control APP")
+        title.setFont(QFont("Arial", 48, QFont.Bold))
+        title.setAlignment(Qt.AlignCenter)
+        title.setStyleSheet("color: #00bfa5; font-size: 48px; font-weight: bold; margin-bottom: 10px")  # tono verde del tema dark_teal
+        v.addWidget(title)
+
+        # Subtítulos
+        author = QLabel("Óscar Fernández Zúñiga")
+        author.setAlignment(Qt.AlignCenter)
+        author.setStyleSheet("color: #cccccc; font-size: 18px; font-weight: bold; margin-bottom: 10px;")
+        v.addWidget(author)
+
+        lab = QLabel("Laboratorio de Sistemas Espaciales")
+        lab.setAlignment(Qt.AlignCenter)
+        lab.setStyleSheet("color: #cccccc; font-size: 18px; font-weight: bold; margin-bottom: 10px;")
+        v.addWidget(lab)
+
+        # Separador visual
+        spacer = QLabel(" ")
+        v.addWidget(spacer)
+
+        # Texto guía pequeño
+        lbl = QLabel("Selecciona un modo")
+        lbl.setFont(QFont("Arial", 13, QFont.Bold))
+        lbl.setAlignment(Qt.AlignCenter)
         v.addWidget(lbl)
 
+        # Botones de navegación
         b1 = QPushButton("Modo Manual"); b1.clicked.connect(lambda: self._goto("manual"))
         b2 = QPushButton("Modo Sistemático"); b2.clicked.connect(lambda: self._goto("systematic"))
         b3 = QPushButton("Modo Monitor"); b3.clicked.connect(lambda: self._goto("monitor"))
-        for b in (b1, b2, b3): v.addWidget(b)
+        for b in (b1, b2, b3):
+            b.setMinimumWidth(200)
+            b.setMaximumWidth(250)
+            b.setStyleSheet("font-size: 14px; margin: 6px;")
+            v.addWidget(b, alignment=Qt.AlignCenter)
+        # =========================================
 
-        self.stack.addWidget(self.menu_page) 
+
+
+
+
+
+        self.stack.addWidget(self.menu_page)  # index 0
 
         # Subpáginas
         self.manual_page = ManualPage(self.request_connect, self.client)
@@ -714,6 +836,7 @@ class MainWindow(QMainWindow):
         return None, 0  # menu
 
     def _goto(self, where: str):
+        # Llamar on_leave de la página actual si aplica
         old_page, _ = self._get_page_by_name(self.current_page_name)
         if old_page and hasattr(old_page, "on_leave"):
             try:
@@ -721,6 +844,7 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 print(f"on_leave error: {e}")
 
+        # Cambiar índice
         if where == "menu":
             self.current_handler = None
             self.stack.setCurrentIndex(0)
@@ -728,7 +852,7 @@ class MainWindow(QMainWindow):
             new_page, idx = self._get_page_by_name(where)
             self.current_handler = new_page.handle_message
             self.stack.setCurrentIndex(idx)
-          
+            # on_enter de la nueva
             if hasattr(new_page, "on_enter"):
                 try:
                     new_page.on_enter()
